@@ -7,40 +7,32 @@ import (
 )
 
 const (
-	// headerSize : packet kind byte + uint16 length (2 bytes)
-	headerSize int = 1 + 2
+	// headerSize : packet kind byte + uint32 sequence (4 bytes) + uint16 length (2 bytes)
+	headerSize int = 1 + 4 + 2
 	// footerSize : crc32 checksum (4 bytes)
 	footerSize int = 4
 	// overheadSize : full size of metadata around the packet data
 	overheadSize int = headerSize + footerSize
 )
 
-type packetKind byte
+func encode(kind packetKind, seq uint32, b []byte) []byte {
+	length := len(b)
+	fullSize := overheadSize * length
+	slices.Grow(b, fullSize)
+	b = b[:fullSize]
+	copy(b[headerSize:headerSize+length], b)
 
-const (
-	packetKindHandshake   packetKind = 0x39
-	packetKindCertificate packetKind = 0x2d
-	packetKindUserData    packetKind = 0x55
-	// 92 07 14 aa b6 1b
-)
-
-var validPacketKinds = []packetKind{
-	// most common
-	packetKindUserData,
-
-	// less common
-	packetKindCertificate,
-	packetKindHandshake,
-}
-
-func encode(kind packetKind, data []byte) []byte {
-	b := make([]byte, overheadSize+len(data))
+	// write header
 	b[0] = byte(kind)
-	length := len(data)
-	b[1] = byte(length >> 8)
-	b[2] = byte(length)
-	copy(b[headerSize:headerSize+len(data)], data)
-	checksum := crc32.ChecksumIEEE(b[:headerSize+len(data)])
+	b[1] = byte(seq >> 24)
+	b[2] = byte(seq >> 16)
+	b[3] = byte(seq >> 8)
+	b[4] = byte(seq)
+	b[5] = byte(length >> 8)
+	b[6] = byte(length)
+
+	// calculate checksum
+	checksum := crc32.ChecksumIEEE(b[:headerSize+length])
 	b[len(b)-4] = byte(checksum >> 24)
 	b[len(b)-3] = byte(checksum >> 16)
 	b[len(b)-2] = byte(checksum >> 8)
@@ -50,7 +42,6 @@ func encode(kind packetKind, data []byte) []byte {
 
 var (
 	errInvalidPacketStructure = errors.New("invalid packet structure")
-	errInvalidPacketKind      = errors.New("invalid packet kind")
 	errInvalidPacketLength    = errors.New("invalid packet length")
 	errInvalidPacketChecksum  = errors.New("invalid packet checksum")
 )
@@ -65,9 +56,6 @@ func decode(b []byte) (kind packetKind, data []byte, err error) {
 		return 0, nil, errInvalidPacketStructure
 	}
 	kind = packetKind(b[0])
-	if !slices.Contains(validPacketKinds, kind) {
-		return 0, nil, errInvalidPacketKind
-	}
 	length := uint16(b[1])<<8 | uint16(b[2])
 	if int(length) != len(b)-overheadSize {
 		return 0, nil, errInvalidPacketLength
