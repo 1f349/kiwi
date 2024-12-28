@@ -1,0 +1,74 @@
+proto_kiwi = Proto("kiwi", "Kiwi")
+
+magic_byte = 0x6e
+min_packet_length = 12
+
+Packet_Kind = {
+  Hello = 0x39,
+  HelloVerify = 0x2d,
+  HelloFinish = 0x92,
+  Ping = 0xb6,
+  Pong = 0x1a,
+  Ack = 0x7f,
+  UserData = 0x55,
+  decode = function(self, number)
+    for type, code in pairs(self) do
+      if not ("decode" == type) and number == code then
+        return type
+      end
+    end
+    return "Unknown"
+  end
+}
+
+packet_kind_field = ProtoField.uint8("kiwi.packet_kind", "Kind", base.HEX)
+sequence_field = ProtoField.uint32("kiwi.sequence", "Sequence", base.DEC)
+checksum_field = ProtoField.uint32("kiwi.checksum", "Checksum", base.HEX)
+packet_length_field = ProtoField.uint16("kiwi.packet_length", "Length", base.DEC)
+
+proto_kiwi.fields = {
+  packet_kind_field,
+  sequence_field,
+  checksum_field,
+  packet_length_field,
+}
+
+function is_kiwi_packet(buffer)
+  length = buffer:len()
+  if length < min_packet_length then
+    return false
+  end
+  return buffer(0, 1):uint() == magic_byte
+end
+
+function proto_kiwi.dissector(buffer, pinfo, tree)
+  if not is_kiwi_packet(buffer) then
+    return
+  end
+
+  pinfo.cols.protocol = proto_kiwi.name
+
+  local subtree = tree:add(proto_kiwi, buffer(), "Kiwi Packet")
+  subtree:add(packet_kind_field, buffer(1, 1)):append_text(" (" .. Packet_Kind:decode(buffer(1, 1):uint()) .. ")")
+  subtree:add(sequence_field, buffer(2, 4))
+  subtree:add(checksum_field, buffer(6, 4))
+  subtree:add(packet_length_field, buffer(10, 2))
+end
+
+udp_table = DissectorTable.get("udp.port")
+udp_table:add(348, proto_kiwi)
+udp_table:add(349, proto_kiwi)
+
+-- heuristic_checker: determine which dissector to use
+local function heuristic_checker(buffer, pinfo, tree)
+  if is_kiwi_packet(buffer) then
+    -- use my dissector
+    proto_kiwi.dissector(buffer, pinfo, tree)
+    return true
+  else
+    return false
+  end
+end
+
+-- register to udp
+proto_kiwi:register_heuristic('udp', heuristic_checker)
