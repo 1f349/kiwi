@@ -17,9 +17,9 @@ func hmacUtil(key, data []byte) []byte {
 	return mac.Sum(nil)
 }
 
-const hmacTimeCycle = 20 * time.Second //time.Minute
+var hmacTimeCycle = time.Minute
 
-func hmacGenerateSharedKey(key Key, t time.Time) (out [blake2s.Size]byte) {
+func hmacGenerateSharedKey(key Key, t time.Time, pubKey Key) (out [blake2s.Size]byte) {
 	mac := hmac.New(func() hash.Hash {
 		b, _ := blake2s.New256(nil)
 		return b
@@ -27,6 +27,7 @@ func hmacGenerateSharedKey(key Key, t time.Time) (out [blake2s.Size]byte) {
 	var tb [8]byte
 	binary.BigEndian.PutUint64(tb[:], uint64(t.UTC().Round(hmacTimeCycle).Unix()))
 	mac.Write(tb[:])
+	mac.Write(pubKey[:])
 	mac.Sum(out[:0])
 	return out
 }

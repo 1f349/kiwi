@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+func init() {
+	hmacTimeCycle = 10 * time.Second
+}
+
 func must[T any](t T, err error) T {
 	if err != nil {
 		panic(err)
@@ -83,6 +87,8 @@ func TestKiwi_Send(t *testing.T) {
 			fmt.Printf("ca: %s - %x\n", addr, b)
 		},
 	}
+	ca.publicKey = ca.privateKey.PublicKey()
+
 	cb := &Client{
 		Conn:       listenOtherUdp,
 		privateKey: must(GeneratePrivateKey()),
@@ -90,9 +96,17 @@ func TestKiwi_Send(t *testing.T) {
 			fmt.Printf("cb: %s - %x\n", addr, b)
 		},
 	}
+	cb.publicKey = cb.privateKey.PublicKey()
 
 	ca.peers.Store(netip.IPv6Loopback(), cb.privateKey.PublicKey())
 	cb.peers.Store(netip.IPv6Loopback(), ca.privateKey.PublicKey())
+
+	stripBool := func(k Key, b bool) Key { return k }
+
+	fmt.Println("ca send -> cb", stripBool(ca.getSendingEncryptionKey(netip.MustParseAddrPort("[::1]:1234"))))
+	fmt.Println("cb send -> ca", stripBool(cb.getSendingEncryptionKey(netip.MustParseAddrPort("[::1]:1234"))))
+	fmt.Println("ca recv <- cb", stripBool(ca.getReceivingEncryptionKey(netip.MustParseAddrPort("[::1]:1234"), 0)))
+	fmt.Println("cb recv <- ca", stripBool(cb.getReceivingEncryptionKey(netip.MustParseAddrPort("[::1]:1234"), 0)))
 
 	ca.Listen()
 	cb.Listen()
@@ -100,9 +114,14 @@ func TestKiwi_Send(t *testing.T) {
 	ca.Send([]byte{0x54, 0xe5}, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
 	ca.Send([]byte{0x54, 0xe6}, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
 
-	time.Sleep(70 * time.Second)
+	cb.Send([]byte{0x5a, 0xe5}, netip.AddrPortFrom(netip.IPv6Loopback(), myPort))
+	cb.Send([]byte{0x5a, 0xe6}, netip.AddrPortFrom(netip.IPv6Loopback(), myPort))
+
+	time.Sleep(hmacTimeCycle + 5*time.Second)
 
 	ca.Send([]byte{0x54, 0xe7}, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
+
+	cb.Send([]byte{0x5a, 0xe7}, netip.AddrPortFrom(netip.IPv6Loopback(), myPort))
 
 	<-time.After(5 * time.Second)
 	assert.NoError(t, ca.Shutdown())

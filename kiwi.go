@@ -159,7 +159,7 @@ func (c *Client) sendPacket(kind packetKind, flag uint8, data []byte, addr netip
 }
 
 func (c *Client) sendEncryptedPacket(kind packetKind, data []byte, addr netip.AddrPort) {
-	sharedKey, ok := c.getEncryptionKey(addr)
+	sharedKey, ok := c.getSendingEncryptionKey(addr)
 	if !ok {
 		return
 	}
@@ -182,11 +182,19 @@ func (c *Client) sendEncryptedPacket(kind packetKind, data []byte, addr netip.Ad
 	c.sendPacket(kind, encFlag, pack, addr)
 }
 
-func (c *Client) getEncryptionKey(addr netip.AddrPort) (Key, bool) {
-	return c.getPossibleEncryptionKey(addr, 0)
+func (c *Client) getSendingEncryptionKey(addr netip.AddrPort) (Key, bool) {
+	key, loaded := c.peers.Load(addr.Addr())
+	if !loaded {
+		return [KeyLen]byte{}, false
+	}
+	return c.getGenericEncryptionKey(addr, 0, key)
 }
 
-func (c *Client) getPossibleEncryptionKey(addr netip.AddrPort, flag uint8) (Key, bool) {
+func (c *Client) getReceivingEncryptionKey(addr netip.AddrPort, flag uint8) (Key, bool) {
+	return c.getGenericEncryptionKey(addr, flag, c.publicKey)
+}
+
+func (c *Client) getGenericEncryptionKey(addr netip.AddrPort, flag uint8, publicKey Key) (Key, bool) {
 	peerPubKey, ok := c.peers.Load(addr.Addr())
 	if !ok {
 		return [KeyLen]byte{}, false
@@ -203,7 +211,7 @@ func (c *Client) getPossibleEncryptionKey(addr netip.AddrPort, flag uint8) (Key,
 	if uint8(m) == flag+1 {
 		n.Add(time.Minute)
 	}
-	peerMacKey := hmacGenerateSharedKey(peerSharedKey, n)
+	peerMacKey := hmacGenerateSharedKey(peerSharedKey, n, publicKey)
 	return peerMacKey, true
 }
 
@@ -317,7 +325,7 @@ func (c *Client) readEncryptedPacket(pack []byte, flag uint8, addr netip.AddrPor
 		return nil
 	}
 
-	sharedKey, ok := c.getPossibleEncryptionKey(addr, flag)
+	sharedKey, ok := c.getReceivingEncryptionKey(addr, flag)
 	if !ok {
 		return nil
 	}
