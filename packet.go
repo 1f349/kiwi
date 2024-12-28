@@ -1,42 +1,39 @@
 package kiwi
 
 import (
+	"encoding/binary"
 	"errors"
 	"hash/crc32"
 	"slices"
 )
 
 const (
-	// headerSize : packet kind byte + uint32 sequence (4 bytes) + uint16 length (2 bytes)
-	headerSize int = 1 + 4 + 2
-	// footerSize : crc32 checksum (4 bytes)
-	footerSize int = 4
-	// overheadSize : full size of metadata around the packet data
-	overheadSize int = headerSize + footerSize
+	// headerSize : magic byte + packet kind byte + uint32 sequence (4 bytes) + crc32 checksum (4 bytes) + uint16 length (2 bytes)
+	headerSize int = 1 + 1 + 4 + 4 + 2
+
+	// magicByte is an identifying mark for kiwi packets, it serves a quick filter for potentially valid packets
+	magicByte = 0x6e
 )
 
 func encode(kind packetKind, seq uint32, b []byte) []byte {
 	length := len(b)
-	fullSize := overheadSize * length
-	slices.Grow(b, fullSize)
+	fullSize := headerSize + length
+	b = slices.Grow(b, fullSize)
 	b = b[:fullSize]
-	copy(b[headerSize:headerSize+length], b)
+	copy(b[headerSize:], b)
 
 	// write header
-	b[0] = byte(kind)
-	b[1] = byte(seq >> 24)
-	b[2] = byte(seq >> 16)
-	b[3] = byte(seq >> 8)
-	b[4] = byte(seq)
-	b[5] = byte(length >> 8)
-	b[6] = byte(length)
+	b[0] = magicByte
+	b[1] = byte(kind)
+	binary.BigEndian.PutUint32(b[2:6], seq)
 
-	// calculate checksum
-	checksum := crc32.ChecksumIEEE(b[:headerSize+length])
-	b[len(b)-4] = byte(checksum >> 24)
-	b[len(b)-3] = byte(checksum >> 16)
-	b[len(b)-2] = byte(checksum >> 8)
-	b[len(b)-1] = byte(checksum)
+	// leave space for the checksum
+
+	binary.BigEndian.PutUint16(b[10:12], uint16(length))
+
+	// calculate checksum with 00000000 in place of the checksum
+	checksum := crc32.ChecksumIEEE(b)
+	binary.BigEndian.PutUint32(b[6:10], checksum)
 	return b
 }
 
@@ -51,20 +48,26 @@ var (
 //
 // The underlying array for the b slice is reused by the data slice. The data
 // slice should be copied, or a new allocation should be used for the input.
-func decode(b []byte) (kind packetKind, data []byte, err error) {
-	if len(b) < headerSize {
-		return 0, nil, errInvalidPacketStructure
+func decode(b []byte) (kind packetKind, seq uint32, data []byte, err error) {
+	if len(b) < headerSize || b[0] != magicByte {
+		return 0, 0, nil, errInvalidPacketStructure
 	}
-	kind = packetKind(b[0])
-	length := uint16(b[1])<<8 | uint16(b[2])
-	if int(length) != len(b)-overheadSize {
-		return 0, nil, errInvalidPacketLength
+	kind = packetKind(b[1])
+	seq = binary.BigEndian.Uint32(b[2:6])
+	checksum := binary.BigEndian.Uint32(b[6:10])
+
+	// zero out ready for checksum calculation
+	binary.BigEndian.PutUint32(b[6:10], 0)
+
+	if checksum != crc32.ChecksumIEEE(b) {
+		return 0, 0, nil, errInvalidPacketChecksum
 	}
-	l := len(b)
-	data = b[headerSize : headerSize+int(length)]
-	checksum := uint32(b[l-4])<<24 | uint32(b[l-3])<<16 | uint32(b[l-2])<<8 | uint32(b[l-1])
-	if checksum != crc32.ChecksumIEEE(b[:l-footerSize]) {
-		return 0, nil, errInvalidPacketChecksum
+
+	length := binary.BigEndian.Uint16(b[10:12])
+	if int(length) != len(b)-headerSize {
+		return 0, 0, nil, errInvalidPacketLength
 	}
-	return kind, data, nil
+
+	data = b[headerSize:]
+	return kind, seq, data, nil
 }

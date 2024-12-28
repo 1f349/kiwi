@@ -2,18 +2,19 @@ package kiwi
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
 	"golang.org/x/crypto/curve25519"
 )
 
-// The key implementation is identical to github.com/WireGuard/wgctrl-go
+// The key implementation is a modified version of github.com/WireGuard/wgctrl-go
 //
 // It is used here as WireGuard is considered secure and should be followed for
 // good security examples.
 
 // KeyLen is the expected key length for kiwi.
-const KeyLen = 32 // wgh.KeyLen
+const KeyLen = 32
 
 // A Key is a public, private, or pre-shared secret key.  The Key constructor
 // functions in this package can be used to create Keys suitable for each of
@@ -28,7 +29,7 @@ type Key [KeyLen]byte
 func GenerateKey() (Key, error) {
 	b := make([]byte, KeyLen)
 	if _, err := rand.Read(b); err != nil {
-		return Key{}, fmt.Errorf("wgtypes: failed to read random bytes: %v", err)
+		return Key{}, fmt.Errorf("kiwi: failed to read random bytes: %v", err)
 	}
 
 	return NewKey(b)
@@ -55,7 +56,7 @@ func GeneratePrivateKey() (Key, error) {
 // exactly 32 bytes in length.
 func NewKey(b []byte) (Key, error) {
 	if len(b) != KeyLen {
-		return Key{}, fmt.Errorf("wgtypes: incorrect key size: %d", len(b))
+		return Key{}, fmt.Errorf("kiwi: incorrect key size: %d", len(b))
 	}
 
 	var k Key
@@ -69,7 +70,7 @@ func NewKey(b []byte) (Key, error) {
 func ParseKey(s string) (Key, error) {
 	b, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return Key{}, fmt.Errorf("wgtypes: failed to parse base64-encoded key: %v", err)
+		return Key{}, fmt.Errorf("kiwi: failed to parse base64-encoded key: %v", err)
 	}
 
 	return NewKey(b)
@@ -91,9 +92,23 @@ func (k Key) PublicKey() Key {
 	return pub
 }
 
+func (k Key) SharedKey(publicKey Key) (Key, error) {
+	sharedKey, err := curve25519.X25519(k[:], publicKey[:])
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return NewKey(sharedKey)
+}
+
 // String returns the base64-encoded string representation of a Key.
 //
 // ParseKey can be used to produce a new Key from this string.
 func (k Key) String() string {
 	return base64.StdEncoding.EncodeToString(k[:])
+}
+
+type KeyHash [32]byte
+
+func (k Key) Hash() KeyHash {
+	return sha256.Sum256(k[:])
 }
