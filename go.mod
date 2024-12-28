@@ -6,7 +6,7 @@ toolchain go1.23.4
 
 require (
 	github.com/1f349/cache v0.0.6
-	github.com/1f349/syncmap v0.0.2
+	github.com/1f349/syncmap v0.0.3
 	github.com/stretchr/testify v1.10.0
 	golang.org/x/crypto v0.31.0
 )

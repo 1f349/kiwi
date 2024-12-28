@@ -28,6 +28,7 @@ func encode(kind packetKind, seq uint32, b []byte) []byte {
 	binary.BigEndian.PutUint32(b[2:6], seq)
 
 	// leave space for the checksum
+	binary.BigEndian.PutUint32(b[6:10], 0)
 
 	binary.BigEndian.PutUint16(b[10:12], uint16(length))
 

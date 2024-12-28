@@ -10,6 +10,13 @@ import (
 	"time"
 )
 
+func must[T any](t T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return t
+}
+
 func TestClient_Listen(t *testing.T) {
 	listenUdp, err := net.ListenUDP("udp", nil)
 	assert.NoError(t, err)
@@ -61,39 +68,43 @@ func TestKiwi_Send(t *testing.T) {
 	listenUdp, err := net.ListenUDP("udp", nil)
 	assert.NoError(t, err)
 
-	println("a")
-
 	listenOtherUdp, err := net.ListenUDP("udp", nil)
 	assert.NoError(t, err)
 
-	println("b")
+	myPort := listenUdp.LocalAddr().(*net.UDPAddr).AddrPort().Port()
+	otherPort := listenOtherUdp.LocalAddr().(*net.UDPAddr).AddrPort().Port()
+	t.Log("myPort", myPort)
+	t.Log("otherPort", otherPort)
 
-	c := &Client{
-		Conn: listenUdp,
+	ca := &Client{
+		Conn:       listenUdp,
+		privateKey: must(GeneratePrivateKey()),
 		Handler: func(b []byte, addr netip.AddrPort) {
-			fmt.Printf("%s - %x\n", addr, b)
+			fmt.Printf("ca: %s - %x\n", addr, b)
 		},
 	}
-	c.Listen()
+	cb := &Client{
+		Conn:       listenOtherUdp,
+		privateKey: must(GeneratePrivateKey()),
+		Handler: func(b []byte, addr netip.AddrPort) {
+			fmt.Printf("cb: %s - %x\n", addr, b)
+		},
+	}
 
-	println("c")
+	ca.peers.Store(netip.IPv6Loopback(), cb.privateKey.PublicKey())
+	cb.peers.Store(netip.IPv6Loopback(), ca.privateKey.PublicKey())
 
-	go func() {
-		var b [1024]byte
-		n, addr, err := listenOtherUdp.ReadFromUDPAddrPort(b[:])
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf("%s - %x\n", addr, b[:n])
-	}()
+	ca.Listen()
+	cb.Listen()
 
-	println("d")
+	ca.Send([]byte{0x54, 0xe5}, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
+	ca.Send([]byte{0x54, 0xe6}, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
 
-	c.Send([]byte{0x54, 0xe5}, listenOtherUdp.LocalAddr().(*net.UDPAddr).AddrPort())
+	time.Sleep(70 * time.Second)
 
-	println("e")
+	ca.Send([]byte{0x54, 0xe7}, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
 
 	<-time.After(5 * time.Second)
-	println("f")
-	assert.NoError(t, c.Shutdown())
+	assert.NoError(t, ca.Shutdown())
+	assert.NoError(t, cb.Shutdown())
 }

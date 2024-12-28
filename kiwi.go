@@ -2,7 +2,6 @@ package kiwi
 
 import (
 	"crypto/rand"
-	"crypto/rsa"
 	"encoding/binary"
 	"errors"
 	"github.com/1f349/cache"
@@ -54,6 +53,12 @@ type Client struct {
 	wrDone *donechan.DoneChan
 }
 
+func (c *Client) initClient() {
+	if c.remoteLastHello == nil {
+		c.remoteLastHello = cache.New[netip.AddrPort, time.Time]()
+	}
+}
+
 type remoteStateItem struct {
 	mu sync.RWMutex
 
@@ -77,6 +82,7 @@ func newRemoteStateItem() remoteStateItem {
 }
 
 func (c *Client) Listen() {
+	c.initClient()
 	if c.running.Swap(true) {
 		panic("Cannot start a single kiwi client twice")
 	}
@@ -140,12 +146,14 @@ func (c *Client) Send(b []byte, addr netip.AddrPort) {
 	c.sendEncryptedPacket(packetKindUserData, b, addr)
 }
 
-func (c *Client) sendPacket(kind packetKind, data []byte, addr netip.AddrPort) {
+func (c *Client) sendPacket(kind packetKind, flag uint8, data []byte, addr netip.AddrPort) {
 	state := c.getLockedRemoteState(addr)
 	seq := state.seq
 	state.seq++
 	state.mu.Unlock()
 	b := encode(kind, seq, data)
+	seq &= 0xf_ff_ff
+	seq |= uint32(flag) << (32 - 4)
 	state.resend.Set(seq, b, time.Now().Add(1*time.Minute))
 	_, _ = c.Conn.WriteToUDPAddrPort(b, addr)
 }
@@ -167,11 +175,18 @@ func (c *Client) sendEncryptedPacket(kind packetKind, data []byte, addr netip.Ad
 		return
 	}
 
+	// use the upper 4 bits of seq for the encryption flag
+	encFlag := uint8(time.Now().UTC().Minute() % 10)
+
 	pack := cha.Seal(iv, iv, data, []byte("kiwi"))
-	c.sendPacket(kind, pack, addr)
+	c.sendPacket(kind, encFlag, pack, addr)
 }
 
 func (c *Client) getEncryptionKey(addr netip.AddrPort) (Key, bool) {
+	return c.getPossibleEncryptionKey(addr, 0)
+}
+
+func (c *Client) getPossibleEncryptionKey(addr netip.AddrPort, flag uint8) (Key, bool) {
 	peerPubKey, ok := c.peers.Load(addr.Addr())
 	if !ok {
 		return [KeyLen]byte{}, false
@@ -180,12 +195,16 @@ func (c *Client) getEncryptionKey(addr netip.AddrPort) (Key, bool) {
 	if err != nil {
 		return [KeyLen]byte{}, false
 	}
-	peerMacKey := hmacGenerateSharedKey(peerSharedKey, time.Now())
+	n := time.Now().UTC()
+	m := n.Minute() % 10
+	if uint8(m) == flag-1 {
+		n.Add(-time.Minute)
+	}
+	if uint8(m) == flag+1 {
+		n.Add(time.Minute)
+	}
+	peerMacKey := hmacGenerateSharedKey(peerSharedKey, n)
 	return peerMacKey, true
-}
-
-func (c *Client) getPossibleEncryptionKeys() {
-
 }
 
 func (c *Client) internalReader() {
@@ -228,6 +247,8 @@ func (c *Client) internalHello(addr netip.AddrPort) {
 	checksum := crc32.ChecksumIEEE(b[:])
 	binary.LittleEndian.PutUint32(b[kiwiLen:kiwiLen+crc32.Size], checksum)
 	c.sendEncryptedPacket(packetKindHello, b[:], addr)
+
+	<-actual
 }
 
 func (c *Client) ping(addr netip.AddrPort) {
@@ -251,19 +272,18 @@ func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
 	// handle packet types
 	switch kind {
 	case packetKindHello:
-		data = c.readEncryptedPacket(data, addr)
+		data = c.readEncryptedPacket(data, encFlag, addr)
 		if data == nil {
 			return
 		}
 		c.sendEncryptedPacket(packetKindHelloVerify, data, addr)
 	case packetKindHelloVerify:
-		data = c.readEncryptedPacket(data, addr)
+		data = c.readEncryptedPacket(data, 0, addr)
 		if data == nil {
 			return
 		}
 		c.sendEncryptedPacket(packetKindHelloFinish, []byte{}, addr)
-	case packetKindHelloFinish:
-		// TODO: figure this too
+
 		ch, ok := c.syncingHello.Load(addr)
 		if !ok {
 			return
@@ -272,9 +292,14 @@ func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
 		case <-ch:
 		default:
 			close(ch)
+			n := time.Now()
+			c.remoteLastHello.Set(addr, n, n.Add(time.Minute))
+			c.syncingHello.Delete(addr)
 		}
+	case packetKindHelloFinish:
+		// TODO: figure this too
 	case packetKindPing:
-		c.sendPacket(packetKindPong, c.publicKey[:], addr)
+		c.sendPacket(packetKindPong, 0, c.publicKey[:], addr)
 	case packetKindPong:
 		state := c.getLockedRemoteState(addr)
 		state.lastPong = time.Now()
@@ -286,13 +311,13 @@ func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
 	}
 }
 
-func (c *Client) readEncryptedPacket(pack []byte, addr netip.AddrPort) []byte {
+func (c *Client) readEncryptedPacket(pack []byte, flag uint8, addr netip.AddrPort) []byte {
 	// obviously invalid packet
 	if len(pack) < nonceSize+chacha20poly1305.Overhead {
 		return nil
 	}
 
-	sharedKey, ok := c.getEncryptionKey(addr)
+	sharedKey, ok := c.getPossibleEncryptionKey(addr, flag)
 	if !ok {
 		return nil
 	}
@@ -313,6 +338,6 @@ func (c *Client) readEncryptedPacket(pack []byte, addr netip.AddrPort) []byte {
 }
 
 func (c *Client) handleEncryptedUserPacket(pack []byte, addr netip.AddrPort) {
-	data := c.readEncryptedPacket(pack, addr)
+	data := c.readEncryptedPacket(pack, 0, addr)
 	c.Handler(data, addr)
 }
