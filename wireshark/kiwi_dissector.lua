@@ -22,15 +22,17 @@ Packet_Kind = {
 }
 
 packet_kind_field = ProtoField.uint8("kiwi.packet_kind", "Kind", base.HEX)
-sequence_field = ProtoField.uint32("kiwi.sequence", "Sequence", base.DEC)
-checksum_field = ProtoField.uint32("kiwi.checksum", "Checksum", base.HEX)
+sequence_field = ProtoField.uint32("kiwi.packet_sequence", "Sequence", base.DEC)
+checksum_field = ProtoField.uint32("kiwi.packet_checksum", "Checksum", base.HEX)
 packet_length_field = ProtoField.uint16("kiwi.packet_length", "Length", base.DEC)
+packet_payload_field = ProtoField.none("kiwi.packet_payload", "Kiwi Payload", base.HEX)
 
 proto_kiwi.fields = {
   packet_kind_field,
   sequence_field,
   checksum_field,
   packet_length_field,
+  packet_payload_field,
 }
 
 function is_kiwi_packet(buffer)
@@ -53,6 +55,7 @@ function proto_kiwi.dissector(buffer, pinfo, tree)
   subtree:add(sequence_field, buffer(2, 4))
   subtree:add(checksum_field, buffer(6, 4))
   subtree:add(packet_length_field, buffer(10, 2))
+  subtree:add(packet_payload_field, buffer(12, buffer(10, 2):uint())):append_text(" (" .. buffer(10, 2):uint() .. " bytes)")
 end
 
 udp_table = DissectorTable.get("udp.port")
