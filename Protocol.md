@@ -28,6 +28,6 @@ The response to `0xb6 Ping`
 
 Used to acknowledge receipt of user data packets
 
-### 0x55 User Data
+### 0x55 Whole Data
 
 Data sent by the application encrypted using the previously acknowledged encryption.

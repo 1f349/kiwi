@@ -143,7 +143,7 @@ func (c *Client) getReadLockedRemoteState(addr netip.AddrPort) *remoteStateItem 
 
 func (c *Client) Send(b []byte, addr netip.AddrPort) {
 	c.internalHello(addr)
-	c.sendEncryptedPacket(packetKindUserData, b, addr)
+	c.sendEncryptedPacket(packetKindWholeData, b, addr)
 }
 
 func (c *Client) sendPacket(kind packetKind, flag uint8, data []byte, addr netip.AddrPort) {
@@ -314,8 +314,8 @@ func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
 		state.lastRoundTrip = state.lastPong.Sub(state.lastPing)
 		state.mu.Unlock()
 	case packetKindAck:
-	case packetKindUserData:
-		c.handleEncryptedUserPacket(data, addr)
+	case packetKindWholeData:
+		c.handleEncryptedWholeData(data, addr)
 	}
 }
 
@@ -345,7 +345,7 @@ func (c *Client) readEncryptedPacket(pack []byte, flag uint8, addr netip.AddrPor
 	return open
 }
 
-func (c *Client) handleEncryptedUserPacket(pack []byte, addr netip.AddrPort) {
+func (c *Client) handleEncryptedWholeData(pack []byte, addr netip.AddrPort) {
 	data := c.readEncryptedPacket(pack, 0, addr)
 	c.Handler(data, addr)
 }

@@ -7,7 +7,7 @@ import (
 )
 
 func TestEncode(t *testing.T) {
-	b := encode(packetKindUserData, 1, []byte{0x54, 0xe5})
+	b := encode(packetKindWholeData, 1, []byte{0x54, 0xe5})
 	fmt.Printf("%x\n", b)
 }
 

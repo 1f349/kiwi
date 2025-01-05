@@ -9,5 +9,5 @@ const (
 	packetKindPing        packetKind = 0xb6
 	packetKindPong        packetKind = 0x1a
 	packetKindAck         packetKind = 0x7f
-	packetKindUserData    packetKind = 0x55
+	packetKindWholeData   packetKind = 0x55
 )
