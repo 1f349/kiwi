@@ -13,6 +13,7 @@ import (
 	mathrand "math/rand"
 	"net"
 	"net/netip"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -36,6 +37,8 @@ type Client struct {
 
 	peers syncmap.Map[netip.Addr, Key]
 
+	segmentPieces syncmap.Map[segmentKey, *segmentData]
+
 	syncingHello syncmap.Map[netip.AddrPort, chan struct{}]
 
 	remoteLastHello *cache.Cache[netip.AddrPort, time.Time]
@@ -51,6 +54,17 @@ type Client struct {
 
 	// wrDone is the done channel for internalWriter
 	wrDone *donechan.DoneChan
+}
+
+type segmentKey struct {
+	AddrPort  netip.AddrPort
+	SegmentId uint32
+}
+
+type segmentData struct {
+	mu     *sync.Mutex
+	pieces [][]byte
+	sent   bool
 }
 
 func (c *Client) initClient() {
@@ -317,6 +331,8 @@ func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
 	case packetKindAck:
 	case packetKindWholeData:
 		c.handleEncryptedWholeData(data, addr)
+	case packetKindSegmentData:
+		c.handleEncryptedSegmentData(data, addr)
 	}
 }
 
@@ -349,4 +365,40 @@ func (c *Client) readEncryptedPacket(pack []byte, flag uint8, addr netip.AddrPor
 func (c *Client) handleEncryptedWholeData(pack []byte, addr netip.AddrPort) {
 	data := c.readEncryptedPacket(pack, 0, addr)
 	c.Handler(data, addr)
+}
+
+func (c *Client) handleEncryptedSegmentData(pack []byte, addr netip.AddrPort) {
+	segmentPack := c.readEncryptedPacket(pack, 0, addr)
+	segment, page, total, data, err := decodeSegment(segmentPack)
+	if err != nil {
+		return
+	}
+
+	key := segmentKey{addr, segment}
+
+	actual, _ := c.segmentPieces.LoadOrStore(key, &segmentData{mu: new(sync.Mutex), pieces: make([][]byte, total)})
+
+	actual.mu.Lock()
+	defer actual.mu.Unlock()
+
+	// invalid page or total
+	if int(total) != len(actual.pieces) || int(page) >= len(actual.pieces) {
+		return
+	}
+
+	actual.pieces[page] = slices.Clip(data)
+
+	if actual.sent {
+		return
+	}
+
+	for _, piece := range actual.pieces {
+		if piece == nil {
+			return
+		}
+	}
+
+	c.Handler(data, addr)
+	actual.sent = true
+	c.segmentPieces.Delete(key)
 }

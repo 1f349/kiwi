@@ -10,4 +10,5 @@ const (
 	packetKindPong        packetKind = 0x1a
 	packetKindAck         packetKind = 0x7f
 	packetKindWholeData   packetKind = 0x55
+	packetKindSegmentData packetKind = 0xde
 )
