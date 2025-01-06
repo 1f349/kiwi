@@ -38,6 +38,7 @@ type Client struct {
 	peers syncmap.Map[netip.Addr, Key]
 
 	segmentPieces syncmap.Map[segmentKey, *segmentData]
+	segmentId     atomic.Uint32
 
 	syncingHello syncmap.Map[netip.AddrPort, chan struct{}]
 
@@ -156,9 +157,22 @@ func (c *Client) getReadLockedRemoteState(addr netip.AddrPort) *remoteStateItem 
 	})
 }
 
+const maxChunkSize = 900
+const maxChunkTotal = 1000
+
 func (c *Client) Send(b []byte, addr netip.AddrPort) {
 	c.internalHello(addr)
-	c.sendEncryptedPacket(packetKindWholeData, b, addr)
+	switch {
+	case len(b) <= maxChunkSize:
+		c.sendEncryptedPacket(packetKindWholeData, b, addr)
+	case len(b) <= maxChunkSize*maxChunkTotal:
+		sId := c.segmentId.Add(1)
+		chunks := slices.Collect(slices.Chunk(b, maxChunkSize))
+		for i, chunk := range chunks {
+			segment := encodeSegment(sId, uint16(i), uint16(len(chunks)), chunk)
+			c.sendEncryptedPacket(packetKindSegmentData, segment, addr)
+		}
+	}
 }
 
 func (c *Client) sendPacket(kind packetKind, flag uint8, data []byte, addr netip.AddrPort) {
@@ -397,6 +411,8 @@ func (c *Client) handleEncryptedSegmentData(pack []byte, addr netip.AddrPort) {
 			return
 		}
 	}
+
+	data = slices.Concat(actual.pieces...)
 
 	c.Handler(data, addr)
 	actual.sent = true
