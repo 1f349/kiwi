@@ -15,6 +15,10 @@ const (
 	magicByte = 0x6e
 )
 
+// encode constructs a kiwi packet from the inputs.
+//
+// The underlying array for the b slice is reused if there is enough space for a
+// full packet.
 func encode(kind packetKind, seq uint32, b []byte) []byte {
 	length := len(b)
 	fullSize := headerSize + length
@@ -45,7 +49,7 @@ var (
 )
 
 // decode parses a kiwi packet ready for handling kiwi protocol commands or
-// forwarding child protocols
+// forwarding child protocols.
 //
 // The underlying array for the b slice is reused by the data slice. The data
 // slice should be copied, or a new allocation should be used for the input.
