@@ -99,6 +99,7 @@ func (c *Client) Shutdown() error {
 	if !c.running.Swap(false) {
 		panic("Kiwi client is not running")
 	}
+	c.wrDone.Close()
 	err := c.Conn.Close()
 	c.wg.Wait()
 	return err

@@ -5,7 +5,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"net"
 	"net/netip"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -57,15 +56,21 @@ func TestShutdown(t *testing.T) {
 		},
 	}
 
-	assert.Equal(t, 2, runtime.NumGoroutine())
-
 	c.Listen()
 
-	assert.Equal(t, 3, runtime.NumGoroutine())
+	select {
+	case <-c.wrDone.C:
+		assert.FailNow(t, "c.wrDone must not be closed after Listen()")
+	default:
+	}
 
 	assert.NoError(t, c.Shutdown())
 
-	assert.Equal(t, 2, runtime.NumGoroutine())
+	select {
+	case <-c.wrDone.C:
+	default:
+		assert.FailNow(t, "c.wrDone must be closed after Shutdown()")
+	}
 }
 
 func TestKiwi_Send(t *testing.T) {
