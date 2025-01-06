@@ -162,15 +162,16 @@ const maxChunkTotal = 1000
 
 func (c *Client) Send(b []byte, addr netip.AddrPort) {
 	c.internalHello(addr)
+	pack, encFlag := c.prepareEncryptedPacket(b, addr)
 	switch {
 	case len(b) <= maxChunkSize:
-		c.sendEncryptedPacket(packetKindWholeData, b, addr)
+		c.sendPacket(packetKindWholeData, encFlag, pack, addr)
 	case len(b) <= maxChunkSize*maxChunkTotal:
 		sId := c.segmentId.Add(1)
-		chunks := slices.Collect(slices.Chunk(b, maxChunkSize))
+		chunks := slices.Collect(slices.Chunk(pack, maxChunkSize))
 		for i, chunk := range chunks {
 			segment := encodeSegment(sId, uint16(i), uint16(len(chunks)), chunk)
-			c.sendEncryptedPacket(packetKindSegmentData, segment, addr)
+			c.sendPacket(packetKindSegmentData, encFlag, segment, addr)
 		}
 	}
 }
@@ -188,6 +189,11 @@ func (c *Client) sendPacket(kind packetKind, flag uint8, data []byte, addr netip
 }
 
 func (c *Client) sendEncryptedPacket(kind packetKind, data []byte, addr netip.AddrPort) {
+	pack, encFlag := c.prepareEncryptedPacket(data, addr)
+	c.sendPacket(kind, encFlag, pack, addr)
+}
+
+func (c *Client) prepareEncryptedPacket(data []byte, addr netip.AddrPort) (pack []byte, encFlag uint8) {
 	sharedKey, ok := c.getSendingEncryptionKey(addr)
 	if !ok {
 		return
@@ -205,10 +211,11 @@ func (c *Client) sendEncryptedPacket(kind packetKind, data []byte, addr netip.Ad
 	}
 
 	// use the upper 4 bits of seq for the encryption flag
-	encFlag := uint8(time.Now().UTC().Minute() % 10)
+	encFlag = uint8(time.Now().UTC().Minute() % 10)
 
-	pack := cha.Seal(iv, iv, data, []byte("kiwi"))
-	c.sendPacket(kind, encFlag, pack, addr)
+	pack = cha.Seal(iv, iv, data, []byte("kiwi"))
+
+	return pack, encFlag
 }
 
 func (c *Client) getSendingEncryptionKey(addr netip.AddrPort) (Key, bool) {
@@ -382,8 +389,7 @@ func (c *Client) handleEncryptedWholeData(pack []byte, addr netip.AddrPort) {
 }
 
 func (c *Client) handleEncryptedSegmentData(pack []byte, addr netip.AddrPort) {
-	segmentPack := c.readEncryptedPacket(pack, 0, addr)
-	segment, page, total, data, err := decodeSegment(segmentPack)
+	segment, page, total, data, err := decodeSegment(pack)
 	if err != nil {
 		return
 	}
@@ -413,8 +419,9 @@ func (c *Client) handleEncryptedSegmentData(pack []byte, addr netip.AddrPort) {
 	}
 
 	data = slices.Concat(actual.pieces...)
+	segmentUnpack := c.readEncryptedPacket(data, 0, addr)
 
-	c.Handler(data, addr)
+	c.Handler(segmentUnpack, addr)
 	actual.sent = true
 	c.segmentPieces.Delete(key)
 }
