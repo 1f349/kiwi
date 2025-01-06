@@ -24,7 +24,7 @@ func encode(kind packetKind, pId uint32, b []byte) []byte {
 	fullSize := headerSize + length
 	b = slices.Grow(b, fullSize)
 	b = b[:fullSize]
-	copy(b[headerSize:], b)
+	copy(b[headerSize:], b[:length])
 
 	// write header
 	b[0] = magicByte

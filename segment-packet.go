@@ -17,7 +17,7 @@ func encodeSegment(segmentId uint32, page, total uint16, b []byte) []byte {
 	fullSize := segmentHeaderSize + length
 	b = slices.Grow(b, fullSize)
 	b = b[:fullSize]
-	copy(b[headerSize:], b)
+	copy(b[segmentHeaderSize:], b[:length])
 
 	binary.BigEndian.PutUint32(b[0:4], segmentId)
 
@@ -41,6 +41,6 @@ func decodeSegment(b []byte) (segmentId uint32, page, total uint16, data []byte,
 	page = binary.BigEndian.Uint16(b[4:6])
 	total = binary.BigEndian.Uint16(b[6:8])
 
-	data = b[headerSize:]
+	data = b[segmentHeaderSize:]
 	return segmentId, page, total, data, nil
 }
