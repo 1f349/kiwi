@@ -28,10 +28,6 @@ The response to `0xb6 Ping`
 
 Used to acknowledge receipt of user data packets
 
-### 0x55 Whole Data
+### 0x55 Data
 
 Data sent by the application encrypted using the previously acknowledged encryption.
-
-### 0xde Segment Data
-
-Segmented data sent by the application encrypted using the previously acknowledged encryption.

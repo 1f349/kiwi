@@ -13,7 +13,6 @@ import (
 	mathrand "math/rand"
 	"net"
 	"net/netip"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -158,22 +157,16 @@ func (c *Client) getReadLockedRemoteState(addr netip.AddrPort) *remoteStateItem 
 }
 
 const maxChunkSize = 900
-const maxChunkTotal = 1000
 
-func (c *Client) Send(b []byte, addr netip.AddrPort) {
-	c.internalHello(addr)
-	pack, encFlag := c.prepareEncryptedPacket(b, addr)
-	switch {
-	case len(b) <= maxChunkSize:
-		c.sendPacket(packetKindWholeData, encFlag, pack, addr)
-	case len(b) <= maxChunkSize*maxChunkTotal:
-		sId := c.segmentId.Add(1)
-		chunks := slices.Collect(slices.Chunk(pack, maxChunkSize))
-		for i, chunk := range chunks {
-			segment := encodeSegment(sId, uint16(i), uint16(len(chunks)), chunk)
-			c.sendPacket(packetKindSegmentData, encFlag, segment, addr)
-		}
+var ErrDataTooLong = errors.New("data too long")
+
+func (c *Client) Send(b []byte, addr netip.AddrPort) error {
+	if len(b) > maxChunkSize {
+		return ErrDataTooLong
 	}
+
+	c.internalHello(addr)
+	return c.sendEncryptedPacket(packetKindData, b, addr)
 }
 
 func (c *Client) sendPacket(kind packetKind, flag uint8, data []byte, addr netip.AddrPort) {
@@ -350,10 +343,8 @@ func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
 		state.lastRoundTrip = state.lastPong.Sub(state.lastPing)
 		state.mu.Unlock()
 	case packetKindAck:
-	case packetKindWholeData:
-		c.handleEncryptedWholeData(data, addr)
-	case packetKindSegmentData:
-		c.handleEncryptedSegmentData(data, addr)
+	case packetKindData:
+		c.handleEncryptedData(data, addr)
 	}
 }
 
@@ -383,45 +374,7 @@ func (c *Client) readEncryptedPacket(pack []byte, flag uint8, addr netip.AddrPor
 	return open
 }
 
-func (c *Client) handleEncryptedWholeData(pack []byte, addr netip.AddrPort) {
+func (c *Client) handleEncryptedData(pack []byte, addr netip.AddrPort) {
 	data := c.readEncryptedPacket(pack, 0, addr)
 	c.Handler(data, addr)
-}
-
-func (c *Client) handleEncryptedSegmentData(pack []byte, addr netip.AddrPort) {
-	segment, page, total, data, err := decodeSegment(pack)
-	if err != nil {
-		return
-	}
-
-	key := segmentKey{addr, segment}
-
-	actual, _ := c.segmentPieces.LoadOrStore(key, &segmentData{mu: new(sync.Mutex), pieces: make([][]byte, total)})
-
-	actual.mu.Lock()
-	defer actual.mu.Unlock()
-
-	// invalid page or total
-	if int(total) != len(actual.pieces) || int(page) >= len(actual.pieces) {
-		return
-	}
-
-	actual.pieces[page] = slices.Clip(data)
-
-	if actual.sent {
-		return
-	}
-
-	for _, piece := range actual.pieces {
-		if piece == nil {
-			return
-		}
-	}
-
-	data = slices.Concat(actual.pieces...)
-	segmentUnpack := c.readEncryptedPacket(data, 0, addr)
-
-	c.Handler(segmentUnpack, addr)
-	actual.sent = true
-	c.segmentPieces.Delete(key)
 }
