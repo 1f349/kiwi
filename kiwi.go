@@ -49,9 +49,6 @@ type Client struct {
 	// wg is the wait group for internal goroutines
 	wg sync.WaitGroup
 
-	// wrReady closes when internalWriter can send user data
-	wrReady chan struct{}
-
 	// wrDone is the done channel for internalWriter
 	wrDone *donechan.DoneChan
 }
