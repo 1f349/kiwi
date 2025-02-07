@@ -95,7 +95,7 @@ func (k Key) PublicKey() Key {
 func (k Key) SharedKey(publicKey Key) (Key, error) {
 	sharedKey, err := curve25519.X25519(k[:], publicKey[:])
 	if err != nil {
-		return [32]byte{}, err
+		return Key{}, err
 	}
 	return NewKey(sharedKey)
 }

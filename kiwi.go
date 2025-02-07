@@ -211,7 +211,7 @@ func (c *Client) prepareEncryptedPacket(data []byte, addr netip.AddrPort) (pack 
 func (c *Client) getSendingEncryptionKey(addr netip.AddrPort) (Key, bool) {
 	key, loaded := c.peers.Load(addr.Addr())
 	if !loaded {
-		return [KeyLen]byte{}, false
+		return Key{}, false
 	}
 	return c.getGenericEncryptionKey(addr, 0, key)
 }
