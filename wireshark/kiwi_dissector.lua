@@ -10,8 +10,7 @@ Packet_Kind = {
   Ping = 0xb6,
   Pong = 0x1a,
   Ack = 0x7f,
-  WholeData = 0x55,
-  SegmentData = 0xde,
+  Data = 0x55,
   decode = function(self, number)
     for type, code in pairs(self) do
       if not ("decode" == type) and number == code then
@@ -27,10 +26,6 @@ sequence_field = ProtoField.uint32("kiwi.packet_sequence", "Sequence", base.DEC)
 checksum_field = ProtoField.uint32("kiwi.packet_checksum", "Checksum", base.HEX)
 packet_length_field = ProtoField.uint16("kiwi.packet_length", "Length", base.DEC)
 packet_payload_field = ProtoField.none("kiwi.packet_payload", "Kiwi Payload", base.HEX)
-packet_segment_id_field = ProtoField.uint32("kiwi.segment_id", "Segment Id", base.DEC)
-packet_segment_page_field = ProtoField.uint16("kiwi.segment_page", "Segment Page", base.DEC)
-packet_segment_total_field = ProtoField.uint16("kiwi.segment_total", "Segment Total", base.DEC)
-packet_segment_payload_field = ProtoField.none("kiwi.segment_payload", "Segment Payload", base.HEX)
 
 proto_kiwi.fields = {
   packet_kind_field,
@@ -38,10 +33,6 @@ proto_kiwi.fields = {
   checksum_field,
   packet_length_field,
   packet_payload_field,
-  packet_segment_id_field,
-  packet_segment_page_field,
-  packet_segment_total_field,
-  packet_segment_payload_field,
 }
 
 function is_kiwi_packet(buffer)
@@ -65,13 +56,6 @@ function proto_kiwi.dissector(buffer, pinfo, tree)
   subtree:add(checksum_field, buffer(6, 4))
   subtree:add(packet_length_field, buffer(10, 2))
   subtree:add(packet_payload_field, buffer(12, buffer(10, 2):uint())):append_text(" (" .. buffer(10, 2):uint() .. " bytes)")
-
-  if buffer(1, 1):uint() == Packet_Kind.SegmentData then
-    subtree:add(packet_segment_id_field, buffer(12, 4))
-    subtree:add(packet_segment_page_field, buffer(16, 2))
-    subtree:add(packet_segment_total_field, buffer(18, 2))
-    subtree:add(packet_segment_payload_field, buffer(20, buffer(10, 2):uint() - 8)):append_text(" (" .. (buffer(10, 2):uint() - 8) .. " bytes)")
-  end
 end
 
 udp_table = DissectorTable.get("udp.port")

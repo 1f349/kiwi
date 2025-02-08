@@ -37,9 +37,6 @@ type Client struct {
 
 	peers syncmap.Map[netip.Addr, Key]
 
-	segmentPieces syncmap.Map[segmentKey, *segmentData]
-	segmentId     atomic.Uint32
-
 	syncingHello syncmap.Map[netip.AddrPort, chan struct{}]
 
 	remoteLastHello *cache.Cache[netip.AddrPort, time.Time]
@@ -52,17 +49,6 @@ type Client struct {
 
 	// wrDone is the done channel for internalWriter
 	wrDone *donechan.DoneChan
-}
-
-type segmentKey struct {
-	AddrPort  netip.AddrPort
-	SegmentId uint32
-}
-
-type segmentData struct {
-	mu     *sync.Mutex
-	pieces [][]byte
-	sent   bool
 }
 
 func (c *Client) initClient() {
