@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"github.com/1f349/cache"
 	"github.com/1f349/kiwi/internal/donechan"
 	"github.com/1f349/syncmap"
@@ -78,6 +79,9 @@ type remoteStateItem struct {
 	// resend contains an array of the previous 20 packets to send
 	resend *cache.Cache[uint32, []byte]
 
+	// ackChan contains the channel to signal when an ack is returned
+	ackChan *cache.Cache[uint32, chan<- time.Time]
+
 	// lastPing contains the last time a ping was sent to the remote connection
 	lastPing time.Time
 	// lastPong contains the last time a pong was received from the remote connection
@@ -88,7 +92,8 @@ type remoteStateItem struct {
 
 func newRemoteStateItem() remoteStateItem {
 	return remoteStateItem{
-		resend: cache.New[uint32, []byte](),
+		resend:  cache.New[uint32, []byte](),
+		ackChan: cache.New[uint32, chan<- time.Time](),
 	}
 }
 
@@ -163,49 +168,63 @@ func (c *Client) Send(b []byte, addr netip.AddrPort) error {
 	}
 
 	c.internalHello(addr)
-	return c.sendEncryptedPacket(packetKindData, b, addr)
+	return c.sendEncryptedPacket(packetKindData, b, addr, nil)
 }
 
-func (c *Client) sendPacket(kind packetKind, flag uint8, data []byte, addr netip.AddrPort) {
+func (c *Client) SendWithAck(b []byte, addr netip.AddrPort) (<-chan time.Time, error) {
+	if len(b) > maxChunkSize {
+		return nil, ErrDataTooLong
+	}
+
+	c.internalHello(addr)
+
+	ack := make(chan time.Time)
+	err := c.sendEncryptedPacket(packetKindData, b, addr, ack)
+	return ack, err
+}
+
+func (c *Client) sendPacket(kind packetKind, flag uint8, data []byte, addr netip.AddrPort, ack chan<- time.Time) error {
 	state := c.getLockedRemoteState(addr)
 	seq := state.seq
 	state.seq++
 	state.mu.Unlock()
 	b := encode(kind, seq, data)
-	seq &= 0xf_ff_ff
+	seq &= 0x7_ff_ff
 	seq |= uint32(flag) << (32 - 4)
-	state.resend.Set(seq, b, time.Now().Add(1*time.Minute))
-	_, _ = c.Conn.WriteToUDPAddrPort(b, addr)
+	if ack != nil {
+		seq &= 1 << (32 - 5)
+		state.ackChan.Set(seq, ack, 2*time.Minute)
+	}
+	state.resend.Set(seq, b, 1*time.Minute)
+	_, err := c.Conn.WriteToUDPAddrPort(b, addr)
+	return err
 }
 
-func (c *Client) sendEncryptedPacket(kind packetKind, data []byte, addr netip.AddrPort) {
-	pack, encFlag := c.prepareEncryptedPacket(data, addr)
-	c.sendPacket(kind, encFlag, pack, addr)
-}
+var ErrUnknownPeer = errors.New("unknown peer")
 
-func (c *Client) prepareEncryptedPacket(data []byte, addr netip.AddrPort) (pack []byte, encFlag uint8) {
+func (c *Client) sendEncryptedPacket(kind packetKind, data []byte, addr netip.AddrPort, ack chan<- time.Time) error {
 	sharedKey, ok := c.getSendingEncryptionKey(addr)
 	if !ok {
-		return
+		return ErrUnknownPeer
 	}
 	cha, err := chacha20poly1305.NewX(sharedKey[:])
 	if err != nil {
-		return
+		return fmt.Errorf("chacha20poly1305: %w", err)
 	}
 
 	packLen := nonceSize + chacha20poly1305.Overhead + len(data)
 	iv := make([]byte, nonceSize, packLen)
 	_, err = rand.Read(iv)
 	if err != nil {
-		return
+		return fmt.Errorf("rand.Read: %w", err)
 	}
 
 	// use the upper 4 bits of seq for the encryption flag
-	encFlag = uint8(time.Now().UTC().Minute() % 10)
+	encFlag := uint8(time.Now().UTC().Minute() % 10)
 
-	pack = cha.Seal(iv, iv, data, []byte("kiwi"))
+	pack := cha.Seal(iv, iv, data, []byte("kiwi"))
 
-	return pack, encFlag
+	return c.sendPacket(kind, encFlag, pack, addr, ack)
 }
 
 func (c *Client) getSendingEncryptionKey(addr netip.AddrPort) (Key, bool) {
@@ -280,7 +299,7 @@ func (c *Client) internalHello(addr netip.AddrPort) {
 	copy(b[kiwiLen+crc32.Size:], key[:])
 	checksum := crc32.ChecksumIEEE(b[:])
 	binary.LittleEndian.PutUint32(b[kiwiLen:kiwiLen+crc32.Size], checksum)
-	c.sendEncryptedPacket(packetKindHello, b[:], addr)
+	_ = c.sendEncryptedPacket(packetKindHello, b[:], addr, nil)
 
 	<-actual
 }
@@ -310,13 +329,13 @@ func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
 		if data == nil {
 			return
 		}
-		c.sendEncryptedPacket(packetKindHelloVerify, data, addr)
+		_ = c.sendEncryptedPacket(packetKindHelloVerify, data, addr, nil)
 	case packetKindHelloVerify:
 		data = c.readEncryptedPacket(data, 0, addr)
 		if data == nil {
 			return
 		}
-		c.sendEncryptedPacket(packetKindHelloFinish, []byte{}, addr)
+		_ = c.sendEncryptedPacket(packetKindHelloFinish, []byte{}, addr, nil)
 
 		ch, ok := c.syncingHello.Load(addr)
 		if !ok {
@@ -327,20 +346,35 @@ func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
 		default:
 			close(ch)
 			n := time.Now()
-			c.remoteLastHello.Set(addr, n, n.Add(time.Minute))
+			c.remoteLastHello.Set(addr, n, time.Minute)
 			c.syncingHello.Delete(addr)
 		}
 	case packetKindHelloFinish:
 		// TODO: figure this too
 	case packetKindPing:
-		c.sendPacket(packetKindPong, 0, c.publicKey[:], addr)
+		_ = c.sendPacket(packetKindPong, 0, c.publicKey[:], addr, nil)
 	case packetKindPong:
 		state := c.getLockedRemoteState(addr)
 		state.lastPong = time.Now()
 		state.lastRoundTrip = state.lastPong.Sub(state.lastPing)
 		state.mu.Unlock()
 	case packetKindAck:
+		data = c.readEncryptedPacket(data, 0, addr)
+		if data == nil {
+			return
+		}
+		state := c.getReadLockedRemoteState(addr)
+		ackChan, ok := state.ackChan.Get(binary.LittleEndian.Uint32(data))
+		if !ok {
+			return
+		}
+		ackChan <- time.Now()
+		state.mu.RUnlock()
 	case packetKindData:
+		isAck := (seq>>(32-5))&1 == 1
+		if isAck {
+			_ = c.sendEncryptedPacket(packetKindAck, binary.LittleEndian.AppendUint32(nil, seq), addr, nil)
+		}
 		c.handleEncryptedData(data, addr)
 	}
 }
