@@ -19,7 +19,7 @@ const (
 //
 // The underlying array for the b slice is reused if there is enough space for a
 // full packet.
-func encode(kind packetKind, pId uint32, b []byte) []byte {
+func encode(kind packetKind, seq Seq, b []byte) []byte {
 	length := len(b)
 	fullSize := headerSize + length
 	b = slices.Grow(b, fullSize)
@@ -29,7 +29,7 @@ func encode(kind packetKind, pId uint32, b []byte) []byte {
 	// write header
 	b[0] = magicByte
 	b[1] = byte(kind)
-	binary.BigEndian.PutUint32(b[2:6], pId)
+	binary.BigEndian.PutUint32(b[2:6], uint32(seq))
 
 	// leave space for the checksum
 	binary.BigEndian.PutUint32(b[6:10], 0)
@@ -53,12 +53,12 @@ var (
 //
 // The underlying array for the b slice is reused by the data slice. The data
 // slice should be copied, or a new allocation should be used for the input.
-func decode(b []byte) (kind packetKind, pId uint32, data []byte, err error) {
+func decode(b []byte) (kind packetKind, seq Seq, data []byte, err error) {
 	if len(b) < headerSize || b[0] != magicByte {
 		return 0, 0, nil, errInvalidPacketStructure
 	}
 	kind = packetKind(b[1])
-	pId = binary.BigEndian.Uint32(b[2:6])
+	seq = Seq(binary.BigEndian.Uint32(b[2:6]))
 	checksum := binary.BigEndian.Uint32(b[6:10])
 
 	// zero out ready for checksum calculation
@@ -74,5 +74,5 @@ func decode(b []byte) (kind packetKind, pId uint32, data []byte, err error) {
 	}
 
 	data = b[headerSize:]
-	return kind, pId, data, nil
+	return kind, seq, data, nil
 }
