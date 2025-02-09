@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -77,7 +78,11 @@ func TestShutdown(t *testing.T) {
 
 var examplePackets = [][]byte{
 	{0x54, 0xe5},
-	slices.Repeat([]byte{1, 2, 3, 4}, 500),
+	slices.Repeat([]byte{1, 2, 3, 4}, 25),
+	slices.Repeat([]byte{1, 2, 3, 4}, 50),
+	slices.Repeat([]byte{1, 2, 3, 4}, 100),
+	slices.Repeat([]byte{1, 2, 3, 4}, 200),
+	slices.Repeat([]byte{1, 2, 3, 4}, 300),
 }
 
 func TestKiwi_Send(t *testing.T) {
@@ -95,6 +100,16 @@ func TestKiwi_Send(t *testing.T) {
 		}
 
 		t.Run(fmt.Sprintf("packet size %d", len(packet0)), func(t *testing.T) {
+			assertSending := func(t *testing.T, err error) {
+				assert.NoError(t, err)
+			}
+			if len(packet0) > 900 {
+				assertSending = func(t *testing.T, err error) {
+					t.Helper()
+					assert.ErrorIs(t, err, ErrDataTooLong)
+				}
+			}
+
 			listenUdp, err := net.ListenUDP("udp", nil)
 			assert.NoError(t, err)
 
@@ -106,8 +121,8 @@ func TestKiwi_Send(t *testing.T) {
 			t.Log("myPort", myPort)
 			t.Log("otherPort", otherPort)
 
-			gotPacketOnA := 0b000
-			gotPacketOnB := 0b000
+			gotPacketOnA := new(atomic.Int32)
+			gotPacketOnB := new(atomic.Int32)
 
 			ca := &Client{
 				Conn:       listenUdp,
@@ -116,7 +131,7 @@ func TestKiwi_Send(t *testing.T) {
 					fmt.Printf("ca: %s - %d - %x\n", addr, len(b), b)
 					for i, pb := range packetSlice {
 						if bytes.Equal(b, pb) {
-							gotPacketOnA |= 1 << i
+							gotPacketOnA.Or(1 << i)
 							fmt.Println("counted")
 							break
 						}
@@ -132,7 +147,7 @@ func TestKiwi_Send(t *testing.T) {
 					fmt.Printf("cb: %s - %d - %x\n", addr, len(b), b)
 					for i, pb := range packetSlice {
 						if bytes.Equal(b, pb) {
-							gotPacketOnB |= 1 << i
+							gotPacketOnB.Or(1 << i)
 							fmt.Println("counted")
 							break
 						}
@@ -154,24 +169,35 @@ func TestKiwi_Send(t *testing.T) {
 			ca.Listen()
 			cb.Listen()
 
-			ca.Send(packet0, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
-			ca.Send(packet1, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
+			err = ca.Send(packet0, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
+			assertSending(t, err)
+			err = ca.Send(packet1, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
+			assertSending(t, err)
 
-			cb.Send(packet0, netip.AddrPortFrom(netip.IPv6Loopback(), myPort))
-			cb.Send(packet1, netip.AddrPortFrom(netip.IPv6Loopback(), myPort))
+			err = cb.Send(packet0, netip.AddrPortFrom(netip.IPv6Loopback(), myPort))
+			assertSending(t, err)
+			err = cb.Send(packet1, netip.AddrPortFrom(netip.IPv6Loopback(), myPort))
+			assertSending(t, err)
 
 			<-time.After(hmacTimeCycle + 3*time.Second)
 
-			ca.Send(packet2, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
+			err = ca.Send(packet2, netip.AddrPortFrom(netip.IPv6Loopback(), otherPort))
+			assertSending(t, err)
 
-			cb.Send(packet2, netip.AddrPortFrom(netip.IPv6Loopback(), myPort))
+			err = cb.Send(packet2, netip.AddrPortFrom(netip.IPv6Loopback(), myPort))
+			assertSending(t, err)
 
 			<-time.After(5 * time.Second)
 			assert.NoError(t, ca.Shutdown())
 			assert.NoError(t, cb.Shutdown())
 
-			assert.Equal(t, 0b111, gotPacketOnA)
-			assert.Equal(t, 0b111, gotPacketOnB)
+			if len(packet0) > 900 {
+				assert.Equal(t, int32(0), gotPacketOnA.Load())
+				assert.Equal(t, int32(0), gotPacketOnB.Load())
+			} else {
+				assert.Equal(t, int32(0b111), gotPacketOnA.Load())
+				assert.Equal(t, int32(0b111), gotPacketOnB.Load())
+			}
 		})
 	}
 }

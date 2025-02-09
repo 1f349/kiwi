@@ -144,7 +144,7 @@ func (c *Client) getReadLockedRemoteState(addr netip.AddrPort) *remoteStateItem 
 
 const maxChunkSize = 900
 
-var ErrDataTooLong = errors.New("data too long")
+var ErrDataTooLong = errors.New("data too long: maximum packet size is 900 bytes")
 
 func (c *Client) Send(b []byte, addr netip.AddrPort) error {
 	if len(b) > maxChunkSize {
