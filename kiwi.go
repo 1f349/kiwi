@@ -26,6 +26,11 @@ type Client struct {
 	Handler    Handler
 	BufferSize int
 
+	// FilterIP returns true if the remote connection is allowed to proceed.
+	// This allows for dropping connections before any parsing or decrypting is done.
+	// The provided function must be thread-safe.
+	FilterIP func(addr netip.AddrPort) bool
+
 	privateKey Key
 	publicKey  Key
 
@@ -293,6 +298,11 @@ func (c *Client) ping(addr netip.AddrPort) {
 }
 
 func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
+	// if FilterIP returns false then drop the connection
+	if c.FilterIP != nil && !c.FilterIP(addr) {
+		return
+	}
+
 	kind, seq, data, err := decode(b)
 	if err != nil {
 		return
