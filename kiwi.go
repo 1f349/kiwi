@@ -250,7 +250,7 @@ func (c *Client) getGenericEncryptionKey(addr netip.AddrPort, flag uint8, public
 func (c *Client) internalReader() {
 	defer c.wg.Done()
 	for {
-		b := make([]byte, 4096)
+		b := make([]byte, 1500)
 		n, addr, err := c.Conn.ReadFromUDPAddrPort(b)
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
