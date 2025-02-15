@@ -22,9 +22,8 @@ const nonceSize = chacha20poly1305.NonceSizeX
 type Handler func(b []byte, addr netip.AddrPort)
 
 type Client struct {
-	Conn       *net.UDPConn
-	Handler    Handler
-	BufferSize int
+	Conn    *net.UDPConn
+	Handler Handler
 
 	// FilterIP returns true if the remote connection is allowed to proceed.
 	// This allows for dropping connections before any parsing or decrypting is done.
