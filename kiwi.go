@@ -31,8 +31,8 @@ type Client struct {
 	// The provided function must be thread-safe.
 	FilterIP func(addr netip.AddrPort) bool
 
-	privateKey Key
-	publicKey  Key
+	PrivateKey Key
+	PublicKey  Key
 
 	cryptoTimeout time.Time
 
@@ -223,7 +223,7 @@ func (c *Client) getSendingEncryptionKey(addr netip.AddrPort) (Key, bool) {
 }
 
 func (c *Client) getReceivingEncryptionKey(addr netip.AddrPort, flag uint8) (Key, bool) {
-	return c.getGenericEncryptionKey(addr, flag, c.publicKey)
+	return c.getGenericEncryptionKey(addr, flag, c.PublicKey)
 }
 
 func (c *Client) getGenericEncryptionKey(addr netip.AddrPort, flag uint8, publicKey Key) (Key, bool) {
@@ -231,7 +231,7 @@ func (c *Client) getGenericEncryptionKey(addr netip.AddrPort, flag uint8, public
 	if !ok {
 		return [KeyLen]byte{}, false
 	}
-	peerSharedKey, err := c.privateKey.SharedKey(peerPubKey)
+	peerSharedKey, err := c.PrivateKey.SharedKey(peerPubKey)
 	if err != nil {
 		return [KeyLen]byte{}, false
 	}
@@ -341,7 +341,7 @@ func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
 	case packetKindHelloFinish:
 		// TODO: figure this too
 	case packetKindPing:
-		_ = c.sendPacket(packetKindPong, 0, c.publicKey[:], addr, nil)
+		_ = c.sendPacket(packetKindPong, 0, c.PublicKey[:], addr, nil)
 	case packetKindPong:
 		state := c.getLockedRemoteState(addr)
 		state.lastPong = time.Now()

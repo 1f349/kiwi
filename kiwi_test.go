@@ -126,7 +126,7 @@ func TestKiwi_Send(t *testing.T) {
 
 			ca := &Client{
 				Conn:       listenUdp,
-				privateKey: must(GeneratePrivateKey()),
+				PrivateKey: must(GeneratePrivateKey()),
 				Handler: func(b []byte, addr netip.AddrPort) {
 					fmt.Printf("ca: %s - %d - %x\n", addr, len(b), b)
 					for i, pb := range packetSlice {
@@ -138,11 +138,11 @@ func TestKiwi_Send(t *testing.T) {
 					}
 				},
 			}
-			ca.publicKey = ca.privateKey.PublicKey()
+			ca.PublicKey = ca.PrivateKey.PublicKey()
 
 			cb := &Client{
 				Conn:       listenOtherUdp,
-				privateKey: must(GeneratePrivateKey()),
+				PrivateKey: must(GeneratePrivateKey()),
 				Handler: func(b []byte, addr netip.AddrPort) {
 					fmt.Printf("cb: %s - %d - %x\n", addr, len(b), b)
 					for i, pb := range packetSlice {
@@ -154,10 +154,10 @@ func TestKiwi_Send(t *testing.T) {
 					}
 				},
 			}
-			cb.publicKey = cb.privateKey.PublicKey()
+			cb.PublicKey = cb.PrivateKey.PublicKey()
 
-			ca.peers.Store(netip.IPv6Loopback(), cb.privateKey.PublicKey())
-			cb.peers.Store(netip.IPv6Loopback(), ca.privateKey.PublicKey())
+			ca.peers.Store(netip.IPv6Loopback(), cb.PrivateKey.PublicKey())
+			cb.peers.Store(netip.IPv6Loopback(), ca.PrivateKey.PublicKey())
 
 			stripBool := func(k Key, b bool) Key { return k }
 
