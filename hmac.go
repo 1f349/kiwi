@@ -8,15 +8,6 @@ import (
 	"time"
 )
 
-func hmacUtil(key, data []byte) []byte {
-	mac := hmac.New(func() hash.Hash {
-		b, _ := blake2s.New256(nil)
-		return b
-	}, key)
-	mac.Write(data)
-	return mac.Sum(nil)
-}
-
 var hmacTimeCycle = time.Minute
 
 func hmacGenerateSharedKey(key Key, t time.Time, pubKey Key) (out [blake2s.Size]byte) {
