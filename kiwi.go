@@ -19,6 +19,13 @@ import (
 
 const nonceSize = chacha20poly1305.NonceSizeX
 
+var pingData = []byte{
+  16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
+  26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+  36, 37, 38, 39, 40, 41, 42, 43, 44, 45,
+  46, 47, 48, 49, 50, 51, 52, 53, 54, 55,
+}
+
 type Handler func(b []byte, addr netip.AddrPort)
 
 type Client struct {
@@ -340,7 +347,7 @@ func (c *Client) handlePacket(b []byte, addr netip.AddrPort) {
 	case packetKindHelloFinish:
 		// TODO: figure this too
 	case packetKindPing:
-		_ = c.sendPacket(packetKindPong, 0, c.PublicKey[:], addr, nil)
+		_ = c.sendPacket(packetKindPong, 0, pingData, addr, nil)
 	case packetKindPong:
 		state := c.getLockedRemoteState(addr)
 		state.lastPong = time.Now()
