@@ -214,8 +214,8 @@ func (c *Client) sendEncryptedPacket(kind packetKind, data []byte, addr netip.Ad
 	}
 
 	packLen := nonceSize + chacha20poly1305.Overhead + len(data)
-	iv := make([]byte, nonceSize, packLen)
-	_, err = rand.Read(iv)
+	pack := make([]byte, nonceSize, packLen)
+	_, err = rand.Read(pack)
 	if err != nil {
 		return fmt.Errorf("rand.Read: %w", err)
 	}
@@ -223,7 +223,11 @@ func (c *Client) sendEncryptedPacket(kind packetKind, data []byte, addr netip.Ad
 	// use the upper 4 bits of seq for the encryption flag
 	encFlag := uint8(time.Now().UTC().Minute() % 10)
 
-	pack := cha.Seal(iv, iv, data, []byte("kiwi"))
+	iv := pack[:nonceSize]
+	packData := pack[nonceSize:]
+
+	packData = cha.Seal(packData[:0], iv, data, []byte("kiwi"))
+	pack = pack[:nonceSize+len(packData)]
 
 	return c.sendPacket(kind, encFlag, pack, addr, ack)
 }
