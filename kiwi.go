@@ -191,8 +191,8 @@ func (c *Client) sendPacket(kind packetKind, flag uint8, data []byte, addr netip
 	seq := state.seq
 	state.seq = state.seq.Increment()
 	state.mu.Unlock()
-	b := encode(kind, seq, data)
 	seq = seq.AddMeta(flag, ack != nil)
+	b := encode(kind, seq, data)
 	if ack != nil {
 		state.ackChan.Set(seq, ack, 2*time.Minute)
 	}
