@@ -157,6 +157,14 @@ const maxChunkSize = 900
 
 var ErrDataTooLong = errors.New("data too long: maximum packet size is 900 bytes")
 
+func (c *Client) AddPeer(addr netip.Addr, key Key) {
+	c.peers.Store(addr, key)
+}
+
+func (c *Client) RemovePeer(addr netip.Addr) {
+	c.peers.Delete(addr)
+}
+
 func (c *Client) Send(b []byte, addr netip.AddrPort) error {
 	if len(b) > maxChunkSize {
 		return ErrDataTooLong
